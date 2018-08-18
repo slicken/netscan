@@ -18,7 +18,6 @@ type Scanner struct {
 	host    string
 	ip      net.IP
 	timeout time.Duration
-	threads int
 	open    chan int
 	done    chan bool
 }
@@ -30,15 +29,15 @@ func usage(msg string, exit bool) {
 		_, main := filepath.Split(os.Args[0])
 		fmt.Printf("Usage: %s <IP> [<port>] [option1] [option2]..\n", main)
 		fmt.Println()
-		fmt.Printf(" <IP>					 ip4,ip6 or host names allowed\n")
-		fmt.Printf(" <port>					 (default 1:65536)\n")
+		fmt.Printf(" <IP>                    ip4,ip6 or host names allowed\n")
+		fmt.Printf(" <port>                  (default 1:65536)\n")
 		fmt.Printf("                         Range scanning allowed on IP4 and port\n")
 		fmt.Printf("                         Example: 192.0.0.1:192.2.255 80:90\n")
 		fmt.Println()
 		fmt.Printf("Options:\n")
 		fmt.Printf(" -w, --threads           (default: 100)\n")
 		fmt.Printf(" -t, --timeout duration  (dafault: 2s)\n")
-		fmt.Printf(" -t, 					 Example: 300ms, 0.5s, 5s\n")
+		fmt.Printf("                         Example: 300ms, 0.5s, 5s\n")
 		fmt.Println()
 	}
 	if exit {
@@ -47,14 +46,14 @@ func usage(msg string, exit bool) {
 }
 
 var (
-	threads            = 10
+	threads            = 100
 	timeout, _         = time.ParseDuration("2s")
 	ipStart, ipEnd     string
 	portStart, portEnd int
 )
 
 func main() {
-	if len(os.Args) < 3 {
+	if len(os.Args) < 2 {
 		usage("", true)
 	}
 
@@ -65,99 +64,91 @@ func main() {
 		ipEnd = ipRange[1]
 	} else {
 		ipStart = os.Args[1]
+		ipEnd = ipStart
 	}
-	if strings.Contains(os.Args[2], ":") {
-		portRange := strings.Split(os.Args[2], ":")
-		portStart, _ = strconv.Atoi(portRange[0])
-		portEnd, _ = strconv.Atoi(portRange[1])
-	} else {
-		portStart, _ = strconv.Atoi(os.Args[2])
+
+	if len(os.Args) > 2 {
+		if strings.Contains(os.Args[2], ":") {
+			portRange := strings.Split(os.Args[2], ":")
+			portStart, _ = strconv.Atoi(portRange[0])
+			portEnd, _ = strconv.Atoi(portRange[1])
+		} else {
+			portStart, _ = strconv.Atoi(os.Args[2])
+			portEnd = portStart
+		}
+	}
+	if portStart < 1 {
+		portStart = 1
+	}
+	if portEnd < 1 || portEnd > 65536 {
+		portEnd = 65536
+	}
+	if portEnd < portStart {
+		usage("Port end must be greater than Port start", true)
+	}
+	if portStart < 1 || portStart > 65536 || portEnd < 1 || portEnd > 65536 {
+		usage("Port range must be between 1 and 65536", true)
 	}
 
 	for i, arg := range os.Args {
-		if arg == "-w" || arg == "--threads" {
-			threads, err = strconv.Atoi(os.Args[i+1])
-			if err != nil {
-				usage("Could not get threads.  Use: -w <num>  number of threads", true)
-			}
-		}
 		if arg == "-t" || arg == "--timeout" {
 			timeout, err = time.ParseDuration(os.Args[i+1])
 			if err != nil {
 				usage("Could not get timeout.  Use: -t <duration>  Example: 300ms, 0.5s, 5s\n", true)
 			}
 		}
-		// addr, err = net.LookupAddr(host)
-		// if err != nil {
-		// 	fmt.Println(err)
-		// }
-	}
-
-	if ipEnd == "" {
-		ipEnd = ipStart
-	}
-	if portStart < 0 {
-		portStart = 0
-	}
-	if portEnd > 65536 {
-		portEnd = 65536
-	}
-	if portEnd == 0 {
-		portEnd = portStart
+		if arg == "-w" || arg == "--threads" {
+			threads, err = strconv.Atoi(os.Args[i+1])
+			if err != nil {
+				usage("Could not get threads.  Use: -w <num>  number of threads", true)
+			}
+		}
 	}
 
 	// ---
 
 	handleInterrupt()
-	ips := createIP4Table(ipStart, ipEnd)
 
+	ips := createIP4Table(ipStart, ipEnd)
+	sem := make(chan int, threads)
 	t := time.Now()
 
 	for _, ip := range ips {
-		scan, err := New(ip)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		scan.Start(portStart, portEnd)
-		scan.Print()
+		scan := New(ip)
+		scan.Start(portStart, portEnd, sem)
 	}
 
+	close(sem)
 	fmt.Println("completed in", time.Since(t))
 }
 
 // New Scanner
-func New(host string) (*Scanner, error) {
+func New(host string) *Scanner {
 	h := &Scanner{
 		ip:      net.ParseIP(host),
 		host:    host,
-		threads: threads,
 		timeout: timeout,
 	}
 	h.open = make(chan int)
 	h.done = make(chan bool, 1)
-
-	return h, nil
+	return h
 }
 
 // Start scanning ...
-func (h *Scanner) Start(portStart int, portEnds int) {
-	go func() {
-		th := make(chan bool, h.threads)
-		for port := portStart; port <= portEnds; port++ {
-			th <- true
-			go func(port int) {
-				if h.connPort(port) {
-					h.open <- port
-				}
-				<-th
-			}(port)
-		}
-		for i := 0; i < cap(th); i++ {
-			th <- true
-		}
-		h.done <- true
-	}()
+func (h *Scanner) Start(portStart int, portEnds int, sem chan int) {
+	go h.Print()
+
+	for port := portStart; port <= portEnds; port++ {
+		sem <- 1
+		go func(port int) {
+			if h.connPort(port) {
+				h.open <- port
+			}
+			<-sem
+			return
+		}(port)
+	}
+	h.done <- true
 }
 
 // connPort ...
@@ -172,7 +163,6 @@ func (h *Scanner) connPort(port int) bool {
 		return false
 	}
 	defer conn.Close()
-
 	return true
 }
 
@@ -190,6 +180,10 @@ func (h *Scanner) Print() {
 
 // createIP4Table slice
 func createIP4Table(ipStart, ipEnd string) []string {
+	if ipStart == ipEnd {
+		return []string{ipStart}
+	}
+
 	var table []string
 	var ip = ipStart
 	for {
@@ -205,14 +199,15 @@ func createIP4Table(ipStart, ipEnd string) []string {
 // nextIP4 ...
 func nextIP4(ipString string) string {
 	ip := strings.Split(ipString, ".")
+
 	for i := len(ip) - 1; i >= 0; i-- {
-		if ip[i] >= "255" {
-			ip[i] = "0"
-			continue
-		}
 		v, err := strconv.Atoi(ip[i])
 		if err != nil {
 			panic(err)
+		}
+		if v >= 255 {
+			ip[i] = "0"
+			continue
 		}
 		v++
 		ip[i] = strconv.Itoa(v)
@@ -263,7 +258,6 @@ var mapPortDescriptions = map[int]string{
 		communication ports for various services, including FTP, SSH, and Samba.
 	*/
 	1: "(tcpmux/TCP) port service multiplexer",
-	5: "(rje/Remote) Job Entry",
 	7: "(echo/Echo) service",
 	9: "(discard/Null) service for connection testing",
 	11: "(systat	System) Status service for listing connected ports",
