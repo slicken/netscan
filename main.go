@@ -90,7 +90,7 @@ func main() {
 		usage("Port range must be between 1 and 65536", true)
 	}
 
-	for i, arg := range os.Args {
+	for i, arg := range os.Args[1:] {
 		if arg == "-t" || arg == "--timeout" {
 			timeout, err = time.ParseDuration(os.Args[i+1])
 			if err != nil {
