@@ -2,6 +2,7 @@
 
 A simple but fast and concurrent IP and Port range scanner written in Go
 
+
 ```
 Usage: main <IP> [<port>] [option1] [option2]..
 
@@ -15,5 +16,3 @@ Options:
  -t, --timeout duration  (dafault: 2s)
                          Example: 300ms, 0.5s, 5s
 ```
-
-./netscan 192.168.0.2:192.168.3.1 1:1000 -t 1.2s
