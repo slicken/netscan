@@ -124,14 +124,13 @@ func main() {
 
 // New Scanner
 func New(host string) *Scanner {
-	h := &Scanner{
+	return &Scanner{
 		ip:      net.ParseIP(host),
 		host:    host,
 		timeout: timeout,
+		open:    make(chan int),
+		done:    make(chan bool, 1),
 	}
-	h.open = make(chan int)
-	h.done = make(chan bool, 1)
-	return h
 }
 
 // Start scanning ...
@@ -145,7 +144,6 @@ func (h *Scanner) Start(portStart int, portEnds int, sem chan int) {
 				h.open <- port
 			}
 			<-sem
-			return
 		}(port)
 	}
 	h.done <- true
@@ -244,8 +242,7 @@ func handleInterrupt() {
 	cancel := make(chan os.Signal, 1)
 	signal.Notify(cancel, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		<-cancel
-		fmt.Println("interrupt recived.")
+		fmt.Println(<-cancel, "recived.")
 		os.Exit(1)
 	}()
 }
