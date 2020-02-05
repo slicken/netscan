@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -36,7 +37,7 @@ func usage(msg string, exit bool) {
 		fmt.Println()
 		fmt.Printf("Options:\n")
 		fmt.Printf(" -w, --threads           (default: 100)\n")
-		fmt.Printf(" -t, --timeout duration  (dafault: 2s)\n")
+		fmt.Printf(" -t, --timeout duration  (dafault: 3s)\n")
 		fmt.Printf("                         Example: 300ms, 0.5s, 5s\n")
 		fmt.Println()
 	}
@@ -47,9 +48,10 @@ func usage(msg string, exit bool) {
 
 var (
 	threads            = 100
-	timeout, _         = time.ParseDuration("2s")
+	timeout, _         = time.ParseDuration("3s")
 	ipStart, ipEnd     string
 	portStart, portEnd int
+	m                  = &sync.Mutex{}
 )
 
 func main() {
@@ -128,25 +130,20 @@ func New(host string) *Scanner {
 		ip:      net.ParseIP(host),
 		host:    host,
 		timeout: timeout,
-		open:    make(chan int),
-		done:    make(chan bool, 1),
 	}
 }
 
 // Start scanning ...
 func (h *Scanner) Start(portStart int, portEnds int, sem chan int) {
-	go h.Print()
-
 	for port := portStart; port <= portEnds; port++ {
 		sem <- 1
-		go func(port int) {
-			if h.connPort(port) {
-				h.open <- port
-			}
-			<-sem
-		}(port)
+		if h.connPort(port) {
+			m.Lock()
+			fmt.Printf("%8v  %v  %s\n", port, h.ip.String(), mapPortDescriptions[port])
+			m.Unlock()
+		}
+		<-sem
 	}
-	h.done <- true
 }
 
 // connPort ...
@@ -160,20 +157,8 @@ func (h *Scanner) connPort(port int) bool {
 	if err != nil {
 		return false
 	}
-	defer conn.Close()
+	conn.Close()
 	return true
-}
-
-// Print ...
-func (h *Scanner) Print() {
-	for {
-		select {
-		case port := <-h.open:
-			fmt.Printf("%8v  %v  %s\n", port, h.ip.String(), mapPortDescriptions[port])
-		case <-h.done:
-			return
-		}
-	}
 }
 
 // createIP4Table slice
