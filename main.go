@@ -19,8 +19,6 @@ type Scanner struct {
 	host    string
 	ip      net.IP
 	timeout time.Duration
-	open    chan int
-	done    chan bool
 }
 
 func usage(msg string, exit bool) {
@@ -33,7 +31,7 @@ func usage(msg string, exit bool) {
 		fmt.Printf(" <IP>                    ip4,ip6 or host names allowed\n")
 		fmt.Printf(" <port>                  (default 1:65536)\n")
 		fmt.Printf("                         Range scanning allowed on IP4 and port\n")
-		fmt.Printf("                         Example: 192.0.0.1:192.2.255 80:90\n")
+		fmt.Printf("                         Example: 192.168.0.1:192.168.255.255 10:65535\n")
 		fmt.Println()
 		fmt.Printf("Options:\n")
 		fmt.Printf(" -w, --threads           (default: 100)\n")
@@ -112,6 +110,7 @@ func main() {
 	handleInterrupt()
 
 	ips := createIP4Table(ipStart, ipEnd)
+	// use semphore channels to limit running threads
 	sem := make(chan int, threads)
 	t := time.Now()
 
@@ -136,18 +135,20 @@ func New(host string) *Scanner {
 // Start scanning ...
 func (h *Scanner) Start(portStart int, portEnds int, sem chan int) {
 	for port := portStart; port <= portEnds; port++ {
+		// +1 thread
 		sem <- 1
-		if h.connPort(port) {
+		if h.connect(port) {
 			m.Lock()
 			fmt.Printf("%8v  %v  %s\n", port, h.ip.String(), mapPortDescriptions[port])
 			m.Unlock()
 		}
+		// free thread
 		<-sem
 	}
 }
 
-// connPort ...
-func (h *Scanner) connPort(port int) bool {
+// connect ...
+func (h *Scanner) connect(port int) bool {
 	addr := fmt.Sprintf("%s:%d", h.host, port)
 	tcpAddr, err := net.ResolveTCPAddr("tcp4", addr)
 	if err != nil {
