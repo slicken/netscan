@@ -119,6 +119,10 @@ func main() {
 		scan.Start(portStart, portEnd, sem)
 	}
 
+	// wait for empty semphore, then we know we are done
+	for len(sem) != 0 {
+	}
+
 	close(sem)
 	fmt.Println("completed in", time.Since(t))
 }
@@ -138,10 +142,10 @@ func (h *Scanner) Start(portStart int, portEnds int, sem chan int) {
 		// +1 thread
 		sem <- 1
 		// make it concurrent
-		go func(port int) {
-			if h.connect(port) {
+		go func(p int) {
+			if h.connect(p) {
 				m.Lock()
-				fmt.Printf("%8v  %v  %s\n", port, h.ip.String(), mapPortDescriptions[port])
+				fmt.Printf("%8v  %v  %s\n", port, h.ip.String(), mapPortDescriptions[p])
 				m.Unlock()
 			}
 			// free thread
