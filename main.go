@@ -92,13 +92,13 @@ func main() {
 
 	for i, arg := range os.Args[1:] {
 		if arg == "-t" || arg == "--timeout" {
-			timeout, err = time.ParseDuration(os.Args[i+1])
+			timeout, err = time.ParseDuration(os.Args[i+2])
 			if err != nil {
 				usage("Could not get timeout.  Use: -t <duration>  Example: 300ms, 0.5s, 5s\n", true)
 			}
 		}
 		if arg == "-w" || arg == "--threads" {
-			threads, err = strconv.Atoi(os.Args[i+1])
+			threads, err = strconv.Atoi(os.Args[i+2])
 			if err != nil {
 				usage("Could not get threads.  Use: -w <num>  number of threads", true)
 			}
@@ -137,13 +137,16 @@ func (h *Scanner) Start(portStart int, portEnds int, sem chan int) {
 	for port := portStart; port <= portEnds; port++ {
 		// +1 thread
 		sem <- 1
-		if h.connect(port) {
-			m.Lock()
-			fmt.Printf("%8v  %v  %s\n", port, h.ip.String(), mapPortDescriptions[port])
-			m.Unlock()
-		}
-		// free thread
-		<-sem
+		// make it concurrent
+		go func(port int) {
+			if h.connect(port) {
+				m.Lock()
+				fmt.Printf("%8v  %v  %s\n", port, h.ip.String(), mapPortDescriptions[port])
+				m.Unlock()
+			}
+			// free thread
+			<-sem
+		}(port)
 	}
 }
 
