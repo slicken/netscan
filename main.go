@@ -121,6 +121,7 @@ func main() {
 
 	// wait for empty semphore, then we know we are done
 	for len(sem) != 0 {
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	close(sem)
