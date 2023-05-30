@@ -26,18 +26,22 @@ func usage(msg string, exit bool) {
 		fmt.Println(msg)
 	} else {
 		_, main := filepath.Split(os.Args[0])
-		fmt.Printf("Usage: %s <IP> [<port>] [option1] [option2]..\n", main)
-		fmt.Println()
-		fmt.Printf(" <IP>                    ip4,ip6 or host names allowed\n")
-		fmt.Printf(" <port>                  (default 1:65536)\n")
-		fmt.Printf("                         Range scanning allowed on IP4 and port\n")
-		fmt.Printf("                         Example: 192.168.0.1:192.168.255.255 10:65535\n")
-		fmt.Println()
-		fmt.Printf("Options:\n")
-		fmt.Printf(" -w, --threads           (default: 100)\n")
-		fmt.Printf(" -t, --timeout duration  (dafault: 3s)\n")
-		fmt.Printf("                         Example: 300ms, 0.5s, 5s\n")
-		fmt.Println()
+		fmt.Printf(`
+Usage:
+  ./%s <IP>[:<IP>] [<port>[:<port>]] [Options]
+
+* <IP>   [:<IP>]          IP4, IP6 or host name allowed
+  <port> [:<port>]        (default 1:65536)
+                          Range scanning allowed on IP4 and port
+                          Example: 192.168.0.1:192.168.1.255 10:10000
+
+Options:
+  -w, --threads           (default 100)
+  -t, --timeout duration  (dafault 3s)
+                          Example: 300ms, 0.5s, 5
+
+`, main)
+
 	}
 	if exit {
 		os.Exit(0)
@@ -47,7 +51,7 @@ func usage(msg string, exit bool) {
 var (
 	threads            = 100
 	timeout, _         = time.ParseDuration("3s")
-	ipStart, ipEnd     string
+	ip_start, ip_end   string
 	portStart, portEnd int
 	m                  = &sync.Mutex{}
 )
@@ -60,11 +64,11 @@ func main() {
 	var err error
 	if strings.Contains(os.Args[1], ":") {
 		ipRange := strings.Split(os.Args[1], ":")
-		ipStart = ipRange[0]
-		ipEnd = ipRange[1]
+		ip_start = ipRange[0]
+		ip_end = ipRange[1]
 	} else {
-		ipStart = os.Args[1]
-		ipEnd = ipStart
+		ip_start = os.Args[1]
+		ip_end = ip_start
 	}
 
 	if len(os.Args) > 2 {
@@ -84,7 +88,7 @@ func main() {
 		portEnd = 65536
 	}
 	if portEnd < portStart {
-		usage("Port end must be greater than Port start", true)
+		usage("Port End must be greater than Port Start", true)
 	}
 	if portStart < 1 || portStart > 65536 || portEnd < 1 || portEnd > 65536 {
 		usage("Port range must be between 1 and 65536", true)
@@ -94,13 +98,13 @@ func main() {
 		if arg == "-t" || arg == "--timeout" {
 			timeout, err = time.ParseDuration(os.Args[i+2])
 			if err != nil {
-				usage("Could not get timeout.  Use: -t <duration>  Example: 300ms, 0.5s, 5s\n", true)
+				usage("Could not get timeout.  Use: -t or --timeout <duration>  Example: 300ms, 0.5s, 5s\n", true)
 			}
 		}
 		if arg == "-w" || arg == "--threads" {
 			threads, err = strconv.Atoi(os.Args[i+2])
 			if err != nil {
-				usage("Could not get threads.  Use: -w <num>  number of threads", true)
+				usage("Could not get threads.  Use: -w or --threads <num>  number of threads", true)
 			}
 		}
 	}
@@ -109,12 +113,12 @@ func main() {
 
 	handleInterrupt()
 
-	ips := createIP4Table(ipStart, ipEnd)
+	ip_string := createIP4Table(ip_start, ip_end)
 	// use semphore channels to limit running threads
 	sem := make(chan int, threads)
 	t := time.Now()
 
-	for _, ip := range ips {
+	for _, ip := range ip_string {
 		scan := New(ip)
 		scan.Start(portStart, portEnd, sem)
 	}
@@ -146,7 +150,7 @@ func (h *Scanner) Start(portStart int, portEnds int, sem chan int) {
 		go func(p int) {
 			if h.connect(p) {
 				m.Lock()
-				fmt.Printf("%8v  %v  %s\n", port, h.ip.String(), mapPortDescriptions[p])
+				fmt.Printf("%9d %10v %45s\n", p, h.ip.String(), mapPortDescriptions[p])
 				m.Unlock()
 			}
 			// free thread
@@ -171,26 +175,26 @@ func (h *Scanner) connect(port int) bool {
 }
 
 // createIP4Table slice
-func createIP4Table(ipStart, ipEnd string) []string {
-	if ipStart == ipEnd {
-		return []string{ipStart}
+func createIP4Table(ip_start, ip_end string) []string {
+	if ip_start == ip_end {
+		return []string{ip_start}
 	}
 
 	var table []string
-	var ip = ipStart
+	var ip = ip_start
 	for {
 		table = append(table, ip)
 		ip = nextIP4(ip)
 
-		if ip == "" || !isIP4Range(ip, ipStart, ipEnd) {
+		if ip == "" || !isIP4Range(ip, ip_start, ip_end) {
 			return table
 		}
 	}
 }
 
 // nextIP4 ...
-func nextIP4(ipString string) string {
-	ip := strings.Split(ipString, ".")
+func nextIP4(ip_string string) string {
+	ip := strings.Split(ip_string, ".")
 
 	for i := len(ip) - 1; i >= 0; i-- {
 		v, err := strconv.Atoi(ip[i])
@@ -209,20 +213,20 @@ func nextIP4(ipString string) string {
 }
 
 // ip4Range checks if ip4 is withing a range
-func isIP4Range(ipString, ipStart, ipEnd string) bool {
-	ip := net.ParseIP(ipString)
+func isIP4Range(ip_string, ip_start, ip_end string) bool {
+	ip := net.ParseIP(ip_string)
 	if ip.To4() == nil {
-		fmt.Printf("%v is not an IPv4 address\n", ipString)
+		fmt.Printf("%v is not an IPv4 address\n", ip_string)
 		os.Exit(1)
 	}
-	start := net.ParseIP(ipStart)
+	start := net.ParseIP(ip_start)
 	if start.To4() == nil {
-		fmt.Printf("ipStart %v is not an IPv4 address\n", ipStart)
+		fmt.Printf("ip_start: %v is not an IPv4 address\n", ip_start)
 		os.Exit(1)
 	}
-	end := net.ParseIP(ipEnd)
+	end := net.ParseIP(ip_end)
 	if end.To4() == nil {
-		fmt.Printf("ipEnd %v is not an IPv4 address\n", ipEnd)
+		fmt.Printf("ip_end: %v is not an IPv4 address\n", ip_end)
 		os.Exit(1)
 	}
 	if bytes.Compare(ip, start) >= 0 && bytes.Compare(ip, end) <= 0 {
@@ -236,7 +240,7 @@ func handleInterrupt() {
 	cancel := make(chan os.Signal, 1)
 	signal.Notify(cancel, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		fmt.Println(<-cancel, "recived.")
+		fmt.Printf("/n%s recived.\n", <-cancel)
 		os.Exit(1)
 	}()
 }
@@ -248,10 +252,10 @@ var mapPortDescriptions = map[int]string{
 		and is used by Red Hat Enterprise Linux as default
 		communication ports for various services, including FTP, SSH, and Samba.
 	*/
-	1: "(tcpmux/TCP) port service multiplexer",
-	7: "(echo/Echo) service",
-	9: "(discard/Null) service for connection testing",
-	11: "(systat	System) Status service for listing connected ports",
+	1:   "(tcpmux/TCP) port service multiplexer",
+	7:   "(echo/Echo) service",
+	9:   "(discard/Null) service for connection testing",
+	11:  "(systat	System) Status service for listing connected ports",
 	13:  "(daytime) Sends date and time to requesting host",
 	17:  "(qotd) Sends quote of the day to connected host",
 	18:  "(msp) Message Send Protocol",
@@ -486,40 +490,40 @@ var mapPortDescriptions = map[int]string{
 	   on your Red Hat Enterprise Linux system, or that is necessary
 	   for communication between Red Hat Enterprise Linux and other operating systems.
 	*/
-	15:   "(netstat) Network Status (netstat)",
-	98:   "(linuxconf) Linuxconf Linux administration tool",
-	106:  "(poppassd) Post Office Protocol password change daemon (POPPASSD)",
-	465:  "(smtps) Simple Mail Transfer Protocol over Secure Sockets Layer (SMTPS)",
-	616:  "(gii) Gated (routing daemon) Interactive Interface",
-	808:  "(omirr) [omirrd] Online Mirror (Omirr) file mirroring services",
-	871:  "(supfileserv) Software Upgrade Protocol (SUP) server",
-	901:  "(swat) Samba Web Administration Tool (SWAT)",
-	953:  "(rndc) Berkeley Internet Name Domain version 9 (BIND 9) remote configuration tool",
-	1127: "(supfiledbg) Software Upgrade Protocol (SUP) debugging",
-	1178: "(skkserv) Simple Kana to Kanji (SKK) Japanese input server",
-	1313: "(xtel	French) Minitel text information system",
-	1529: "(support) [prmsd, gnatsd]	GNATS bug tracking system",
-	2003: "(cfinger) GNU finger",
-	2150: "(ninstall) Network Installation Service",
-	2988: "(afbackup) afbackup client-server backup system",
-	3128: "(squid) Squid Web proxy cache",
-	3455: "(prsvp) RSVP port",
-	5432: "(postgres) PostgreSQL database",
-	4557: "(fax) FAX transmission service (old service)",
-	4559: "(hylafax) HylaFAX client-server protocol (new service)",
-	5232: "(sgi-dgl) SGI Distributed Graphics Library",
-	5354: "(noclog) NOCOL network operation center logging daemon (noclogd)",
-	5355: "(hostmon) NOCOL network operation center host monitoring",
-	5680: "(canna) Canna Japanese character input interface",
-	6010: "(x11-ssh-offset) Secure Shell (SSH) X11 forwarding offset",
-	6667: "(ircd) Internet Relay Chat daemon (ircd)",
-	7100: "(xfs) X Font Server (XFS)",
-	7666: "(tircproxy) Tircproxy IRC proxy service",
-	8008: "(http-alt) Hypertext Tranfer Protocol (HTTP) alternate",
-	8080: "(webcache) World Wide Web (WWW) caching service",
-	8081: "(tproxy) Transparent Proxy",
-	9100: "(jetdirect) [laserjet, hplj] Hewlett-Packard (HP) JetDirect network printing service",
-	9359: "(mandelspawn) [mandelbrot]	Parallel mandelbrot spawning program for the X Window System",
+	15:    "(netstat) Network Status (netstat)",
+	98:    "(linuxconf) Linuxconf Linux administration tool",
+	106:   "(poppassd) Post Office Protocol password change daemon (POPPASSD)",
+	465:   "(smtps) Simple Mail Transfer Protocol over Secure Sockets Layer (SMTPS)",
+	616:   "(gii) Gated (routing daemon) Interactive Interface",
+	808:   "(omirr) [omirrd] Online Mirror (Omirr) file mirroring services",
+	871:   "(supfileserv) Software Upgrade Protocol (SUP) server",
+	901:   "(swat) Samba Web Administration Tool (SWAT)",
+	953:   "(rndc) Berkeley Internet Name Domain version 9 (BIND 9) remote configuration tool",
+	1127:  "(supfiledbg) Software Upgrade Protocol (SUP) debugging",
+	1178:  "(skkserv) Simple Kana to Kanji (SKK) Japanese input server",
+	1313:  "(xtel	French) Minitel text information system",
+	1529:  "(support) [prmsd, gnatsd]	GNATS bug tracking system",
+	2003:  "(cfinger) GNU finger",
+	2150:  "(ninstall) Network Installation Service",
+	2988:  "(afbackup) afbackup client-server backup system",
+	3128:  "(squid) Squid Web proxy cache",
+	3455:  "(prsvp) RSVP port",
+	5432:  "(postgres) PostgreSQL database",
+	4557:  "(fax) FAX transmission service (old service)",
+	4559:  "(hylafax) HylaFAX client-server protocol (new service)",
+	5232:  "(sgi-dgl) SGI Distributed Graphics Library",
+	5354:  "(noclog) NOCOL network operation center logging daemon (noclogd)",
+	5355:  "(hostmon) NOCOL network operation center host monitoring",
+	5680:  "(canna) Canna Japanese character input interface",
+	6010:  "(x11-ssh-offset) Secure Shell (SSH) X11 forwarding offset",
+	6667:  "(ircd) Internet Relay Chat daemon (ircd)",
+	7100:  "(xfs) X Font Server (XFS)",
+	7666:  "(tircproxy) Tircproxy IRC proxy service",
+	8008:  "(http-alt) Hypertext Tranfer Protocol (HTTP) alternate",
+	8080:  "(webcache) World Wide Web (WWW) caching service",
+	8081:  "(tproxy) Transparent Proxy",
+	9100:  "(jetdirect) [laserjet, hplj] Hewlett-Packard (HP) JetDirect network printing service",
+	9359:  "(mandelspawn) [mandelbrot]	Parallel mandelbrot spawning program for the X Window System",
 	10081: "(kamanda) Amanda backup service over Kerberos",
 	10082: "(amandaidx) Amanda index server",
 	10083: "(amidxtape) Amanda tape server",
